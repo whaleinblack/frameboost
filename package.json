@@ -1,0 +1,25 @@
+{
+  "name": "frameboost",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "FrameBoost 网页视频补帧扩展的测试和打包脚本；扩展本身没有运行时依赖，也不需要构建。",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node tests/quality.mjs && node tests/neural.mjs && node tests/e2e.mjs",
+    "test:quality": "node tests/quality.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "pack": "node scripts/pack.mjs"
+  },
+  "devDependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "playwright-core": "^1.50.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/whaleinblack/frameboost.git"
+  }
+}

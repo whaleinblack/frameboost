@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>FrameBoost</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <h1>FrameBoost</h1>
+      <label class="switch">
+        <input id="enabled" type="checkbox" />
+        <span>启用补帧</span>
+      </label>
+    </header>
+
+    <section class="status" aria-live="polite">
+      <p id="engine" class="engine" hidden></p>
+      <p id="engine-note" class="engine-note" hidden></p>
+      <p id="rate" class="rate" hidden></p>
+      <p id="message" class="message">正在读取状态…</p>
+      <p id="meta" class="meta" hidden></p>
+      <button id="reload-cors" class="action" type="button" hidden>重新加载视频以启用补帧</button>
+    </section>
+
+    <fieldset>
+      <legend>目标帧率</legend>
+      <div class="segments">
+        <label><input type="radio" name="targetFps" value="60" /><span>60</span></label>
+        <label><input type="radio" name="targetFps" value="120" /><span>120</span></label>
+        <label><input type="radio" name="targetFps" value="0" /><span>屏幕上限</span></label>
+      </div>
+      <p id="fps-note" class="note" hidden></p>
+    </fieldset>
+
+    <fieldset>
+      <legend>画质</legend>
+      <div class="segments">
+        <label><input type="radio" name="quality" value="neural" /><span>AI</span></label>
+        <label><input type="radio" name="quality" value="high" /><span>精细</span></label>
+        <label><input type="radio" name="quality" value="medium" /><span>均衡</span></label>
+        <label><input type="radio" name="quality" value="low" /><span>省电</span></label>
+      </div>
+    </fieldset>
+
+    <label class="check">
+      <input id="hud" type="checkbox" />
+      <span>在视频上显示实时帧率</span>
+    </label>
+
+    <p class="note">快捷键 Alt+Shift+F 可随时开关，方便对比。</p>
+    <script src="popup.js"></script>
+  </body>
+</html>

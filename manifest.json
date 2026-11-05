@@ -1,0 +1,71 @@
+{
+  "manifest_version": 3,
+  "name": "FrameBoost 网页视频补帧",
+  "version": "1.0.0",
+  "description": "用本机显卡运行 AI 模型，把网页视频实时补到 60 / 120 fps。全部在本机运行，不上传任何数据。",
+  "minimum_chrome_version": "121",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "FrameBoost 网页视频补帧",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "scripting",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "commands": {
+    "toggle-boost": {
+      "suggested_key": {
+        "default": "Alt+Shift+F"
+      },
+      "description": "开关补帧（方便对比效果）"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/engine.js",
+        "src/rife.js",
+        "src/repair.js",
+        "src/neural.js",
+        "src/audio-delay.js",
+        "src/captions.js",
+        "src/content.js"
+      ],
+      "all_frames": true,
+      "match_origin_as_fallback": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "models/rife49.bin",
+        "models/rife49.json"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "use_dynamic_url": true
+    }
+  ]
+}
