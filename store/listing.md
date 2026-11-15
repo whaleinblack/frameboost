@@ -22,9 +22,13 @@ FrameBoost 让网页视频看起来更流畅：它在两帧真实画面之间实
 · 音画同步：AI 模式下画面延后 0.3 秒，声音同步延后，看电影没有音画差。
 · 稳定的节奏：输出帧率取屏幕刷新率的整除值，避免忽快忽慢。
 · 显卡不够时自动降级：被游戏占满显卡时退回轻量的光流补帧，稍后自动重试。
+· 状态一目了然：弹窗顶部显示 AI 是否在工作，退回光流时写明原因，视频上也会提示。
+· 航拍更稳：镜头整体旋转、推近时，大片重复图案（屋顶、农田、太阳能板）也能对齐，不出现重影。
 · 快捷键 Alt+Shift+F 随时开关，方便对比效果。
 
 隐私：画面只在本机内存和显卡中处理，扩展不向开发者或任何第三方发送请求，没有统计和广告。
+
+截图中的画面来自 Big Buck Bunny（© Blender Foundation，CC BY 3.0）。
 
 使用要求：Chrome 或 Edge 121 及以上；AI 模式需要支持 WebGPU 的独立显卡，否则使用光流模式。
 
@@ -44,7 +48,7 @@ FrameBoost 让网页视频看起来更流畅：它在两帧真实画面之间实
 
 **Summary**: Smooth web video to 60 / 120 fps with an AI model running on your own GPU. Nothing leaves your computer.
 
-**Description**: FrameBoost inserts new frames between the real ones while a video plays, turning 24 or 30 fps video into 60, 120 fps or your display's refresh rate. It runs the RIFE 4.9 network on your own GPU through WebGPU, picks a model size your GPU can sustain, delays the sound to stay in sync, and falls back to lightweight optical flow when a game takes the GPU. Frames are processed in memory on your computer; the extension sends nothing to the developer or anyone else. DRM-protected video (Netflix, Disney+, Prime Video) cannot be read by extensions and is left alone. The interface is in Chinese. Source: https://github.com/whaleinblack/frameboost
+**Description**: FrameBoost inserts new frames between the real ones while a video plays, turning 24 or 30 fps video into 60, 120 fps or your display's refresh rate. It runs the RIFE 4.9 network on your own GPU through WebGPU, picks a model size your GPU can sustain, delays the sound to stay in sync, and falls back to lightweight optical flow when a game takes the GPU. Frames are processed in memory on your computer; the extension sends nothing to the developer or anyone else. DRM-protected video (Netflix, Disney+, Prime Video) cannot be read by extensions and is left alone. The popup always shows whether AI interpolation is running and why not when it has fallen back. The interface is in Chinese. Screenshots show Big Buck Bunny (© Blender Foundation, CC BY 3.0). Source: https://github.com/whaleinblack/frameboost
 
 ## 隐私权规范
 
@@ -65,23 +69,25 @@ FrameBoost 让网页视频看起来更流畅：它在两帧真实画面之间实
 
 **数据使用**：所有数据类别都不勾选（不收集任何用户数据）。三项承诺全部勾选：不出售给第三方、不用于与单一用途无关的目的、不用于判断信用或放贷。
 
-**隐私政策网址**：https://github.com/whaleinblack/frameboost/blob/main/PRIVACY.md （推送到 GitHub 后生效）
+**隐私政策网址**：https://github.com/whaleinblack/frameboost/blob/main/PRIVACY.md
 
 ## 图片素材
 
 | 素材 | 规格 | 状态 |
 | --- | --- | --- |
 | 商店图标 | 128×128 PNG | 已有 `icons/icon128.png` |
-| 屏幕截图 | 1280×800 或 640×400，1–5 张 | 待制作 |
-| 小型宣传图块 | 440×280 | 待制作 |
-| 顶部宣传图块 | 1400×560 | 可选 |
+| 屏幕截图 | 1280×800，4 张 | `store/images/screenshot-1…4` |
+| 小型宣传图块 | 440×280 | `store/images/promo-small-440x280.png` |
+| 顶部宣传图块 | 1400×560 | 可选，未做 |
 
-截图不用有版权的视频画面，计划用 Big Buck Bunny（CC BY 3.0，Blender Foundation），并在说明里注明出处。计划内容：
+截图按顺序上传：
 
-1. 视频页面上显示“24 → 120 fps”的实时帧率，旁边是工具栏弹窗。
-2. 两张真实画面之间插入的中间帧排成一行，展示补帧在做什么。
-3. 弹窗设置的特写：目标帧率和画质。
-4. “全部在本机运行”的说明卡片。
+1. 扩展在视频上运行，左上角是实时帧率，右边是弹窗（AI 补帧生效中）。
+2. 补帧在做什么：24 fps 每两帧之间补 4 帧成为 120 fps 的示意图。
+3. 弹窗的三种状态：AI 生效、AI 退回光流并写明原因、补帧关闭。
+4. 隐私和使用要求。
+
+截图里的视频和弹窗都是扩展实际运行时拍下的，画面来自 Big Buck Bunny（© Blender Foundation，CC BY 3.0），出处写在第 1 张截图和详细说明里。
 
 ## 审核测试说明
 
@@ -90,10 +96,10 @@ FrameBoost 让网页视频看起来更流畅：它在两帧真实画面之间实
 ## 提交前检查
 
 - [ ] 账号持有人注册 Chrome Web Store 开发者账号（一次性付费），完成联系邮箱验证。
-- [ ] 推送代码到 GitHub，确认隐私政策网址能公开打开。
-- [ ] 运行 `npm test`，确认测试通过。
+- [x] 推送代码到 GitHub，确认隐私政策网址能公开打开。
+- [x] 运行 `npm test`，确认测试通过。
 - [ ] 运行 `npm run pack` 生成 `frameboost-1.0.0.zip` 并上传。
-- [ ] 制作并上传截图和宣传图块。
+- [ ] 上传 `store/images` 里的截图和宣传图块（已制作）。
 - [ ] 在控制台填写上面的商品详情、隐私权规范和测试说明后提交审核。
 
 请求所有网站的访问权限，审核通常会更深入，等待时间可能比一般扩展长。同一个 zip 也可以免费提交到 Microsoft Edge 加载项商店。
