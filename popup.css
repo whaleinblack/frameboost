@@ -9,6 +9,7 @@
   --hs-on-accent: #ffffff;
   --hs-warn: #8a4b00;
   --hs-warn-surface: #fff1d6;
+  --hs-track: rgba(20, 33, 61, 0.28);
   color-scheme: light;
 }
 
@@ -24,6 +25,7 @@
     --hs-on-accent: #08111f;
     --hs-warn: #ffd08a;
     --hs-warn-surface: rgba(255, 176, 32, 0.16);
+    --hs-track: rgba(229, 237, 247, 0.28);
     color-scheme: dark;
   }
 }
@@ -58,19 +60,74 @@ p {
   gap: 12px;
 }
 
-.switch,
-.check {
+.toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
   cursor: pointer;
 }
 
-input[type="checkbox"] {
+/* A pill that slides: the native checkbox keeps keyboard and screen reader behaviour. */
+.toggle input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--hs-track);
+  cursor: pointer;
+  transition: background-color 160ms;
+}
+
+.toggle input::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
   width: 16px;
   height: 16px;
-  margin: 0;
-  accent-color: var(--hs-accent);
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 160ms;
+}
+
+.toggle input:checked {
+  background: var(--hs-accent);
+}
+
+.toggle input:checked::before {
+  transform: translateX(18px);
+}
+
+.power {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--hs-border);
+  border-radius: 12px;
+  background: var(--hs-surface);
+  color: var(--hs-text-muted);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms, color 160ms;
+}
+
+.power[aria-pressed="true"] {
+  border-color: var(--hs-accent);
+  background: var(--hs-accent);
+  color: var(--hs-on-accent);
+}
+
+.center {
+  text-align: center;
 }
 
 .status {
@@ -177,14 +234,15 @@ legend {
 }
 
 .segments input:focus-visible + span,
-input[type="checkbox"]:focus-visible,
 .action:focus-visible {
   outline: 2px solid var(--hs-accent-strong);
   outline-offset: -2px;
 }
 
-.check {
-  margin-top: 16px;
+.toggle input:focus-visible,
+.power:focus-visible {
+  outline: 2px solid var(--hs-accent-strong);
+  outline-offset: 2px;
 }
 
 .action {
@@ -200,7 +258,10 @@ input[type="checkbox"]:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .segments span {
+  .segments span,
+  .toggle input,
+  .toggle input::before,
+  .power {
     transition: none;
   }
 }

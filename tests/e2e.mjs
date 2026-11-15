@@ -528,8 +528,28 @@ try {
     check(`popup loads settings (${scheme})`, await popup.locator('input[name=targetFps][value="120"]').isChecked());
     const flowLine = await popup.locator("#engine").textContent();
     check(`popup names the running engine (${scheme})`, await popup.locator("#engine").isVisible() && flowLine.includes("补帧"), flowLine);
+    if (scheme === "light") {
+      const stored = (key) => worker.evaluate((k) => chrome.storage.sync.get(k), key);
+      await popup.click("#enabled");
+      await popup.waitForTimeout(300);
+      const off = await stored("enabled");
+      check("big button turns interpolation off", off.enabled === false && (await popup.locator("#enabled").textContent()) === "补帧已关闭", JSON.stringify(off));
+      await popup.waitForTimeout(1500);
+      check("no engine named while off", await popup.locator("#engine").isHidden());
+      await popup.screenshot({ path: join(outDir, "popup-off.png"), fullPage: true });
+      await popup.click("#enabled");
+      await popup.waitForTimeout(300);
+      const on = await stored("enabled");
+      check("big button turns it back on", on.enabled === true && (await popup.locator("#enabled").getAttribute("aria-pressed")) === "true", JSON.stringify(on));
+      await popup.click("#hud");
+      await popup.waitForTimeout(300);
+      const hud = await stored("hud");
+      check("frame rate switch saves", hud.hud === true, JSON.stringify(hud));
+      await popup.click("#hud");
+      await popup.waitForTimeout(300);
+    }
     await popup.bringToFront();
-    await popup.screenshot({ path: join(outDir, `popup-${scheme}.png`) });
+    await popup.screenshot({ path: join(outDir, `popup-${scheme}.png`), fullPage: true });
     await popup.close();
   }
   await page.close();

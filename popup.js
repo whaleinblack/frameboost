@@ -9,8 +9,14 @@ async function activeTabId() {
   return tab?.id;
 }
 
+function showPower() {
+  const on = settings.enabled !== false;
+  $("enabled").setAttribute("aria-pressed", String(on));
+  $("enabled").textContent = on ? "补帧已开启" : "补帧已关闭";
+}
+
 function showSettings() {
-  $("enabled").checked = settings.enabled;
+  showPower();
   $("hud").checked = settings.hud;
   document.querySelector(`input[name=targetFps][value="${settings.targetFps}"]`).checked = true;
   document.querySelector(`input[name=quality][value="${settings.quality}"]`).checked = true;
@@ -25,7 +31,9 @@ function showEngine(status) {
   const reason = $("engine-note");
   let kind = "";
   let text = "";
-  if (status?.engine === "neural") {
+  if (status?.state === "off") {
+    // Nothing is interpolating, so no engine is worth naming.
+  } else if (status?.engine === "neural") {
     kind = "ai";
     if (status.state === "loading") text = "AI 补帧：正在加载模型";
     else if (status.state === "audioWait") text = "AI 补帧：等你点一下视频页面";
@@ -88,7 +96,17 @@ function save(partial) {
   chrome.storage.sync.set(partial);
 }
 
-$("enabled").addEventListener("change", (event) => save({ enabled: event.target.checked }));
+$("enabled").addEventListener("click", () => {
+  save({ enabled: !settings.enabled });
+  showPower();
+  refresh();
+});
+// The shortcut can switch it while the popup is open.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync" || !changes.enabled) return;
+  settings.enabled = changes.enabled.newValue;
+  showPower();
+});
 $("hud").addEventListener("change", (event) => save({ hud: event.target.checked }));
 document.querySelectorAll("input[name=targetFps]").forEach((input) => {
   input.addEventListener("change", () => save({ targetFps: Number(input.value) }));

@@ -8,10 +8,6 @@
   <body>
     <header class="head">
       <h1>FrameBoost</h1>
-      <label class="switch">
-        <input id="enabled" type="checkbox" />
-        <span>启用补帧</span>
-      </label>
     </header>
 
     <section class="status" aria-live="polite">
@@ -43,12 +39,13 @@
       </div>
     </fieldset>
 
-    <label class="check">
-      <input id="hud" type="checkbox" />
+    <label class="toggle">
       <span>在视频上显示实时帧率</span>
+      <input id="hud" type="checkbox" role="switch" />
     </label>
 
-    <p class="note">快捷键 Alt+Shift+F 可随时开关，方便对比。</p>
+    <button id="enabled" class="power" type="button" aria-pressed="true">补帧已开启</button>
+    <p class="note center">点击开关补帧，快捷键 Alt+Shift+F，方便对比。</p>
     <script src="popup.js"></script>
   </body>
 </html>
