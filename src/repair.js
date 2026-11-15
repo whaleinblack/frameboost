@@ -25,6 +25,10 @@
   // that also matches. Curved patterns do not move as whole tiles, so there it would do harm.
   const STRICT_RATIO = 0.85;
   const SAMPLE_COST = 1.5e6 / 3000; // in multiply-adds, so slicing can weigh it against the network
+  const FIT_GRID = [96, 54];
+  const GLOBAL_CELL = 8; // in 1080p pixels
+  const GLOBAL_TOLERANCE = 0.012; // how much worse the fitted motion may match and still be taken
+  const GLOBAL_MIN_SHARE = 0.8; // of the picture the fit must explain: a shot that moves as a whole, not a pan over moving people
 
   const LUMA = "const LUMA = vec3f(0.2126, 0.7152, 0.0722);";
 
@@ -481,6 +485,193 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   textureStore(maskOut, id, vec4f(mix(mask.r, 0.5, share)));
 }`;
 
+  // A shot that moves as a whole, such as a drone turning over a field of identical mirrors, has
+  // one motion for the entire picture. The network estimates it point by point at a fraction of the
+  // source size, and a pixel off at 4K doubles every edge of a dense pattern. One affine motion fitted
+  // to the whole field is far more precise, and wherever it matches as well, it is used instead.
+  const FIT_SHADER = /* wgsl */ `
+struct P { size: vec2f, grid: vec2i, scale: f32 }
+@group(0) @binding(0) var<uniform> p: P;
+@group(0) @binding(1) var flow: texture_2d<f32>;
+@group(0) @binding(2) var<storage, read_write> model: array<vec4f, 2>;
+var<workgroup> acc: array<array<f32, 12>, 256>;
+var<workgroup> params: array<f32, 6>;
+var<workgroup> valid: f32;
+
+fn motion(i: i32, dims: vec2f) -> vec4f {
+  let uv = (vec2f(f32(i % p.grid.x), f32(i / p.grid.x)) + 0.5) / vec2f(p.grid);
+  let f = textureLoad(flow, vec2i(uv * dims), 0);
+  return vec4f(uv - 0.5, (f.zw - f.xy) * p.size);
+}
+
+fn predict(x: vec2f) -> vec2f {
+  return vec2f(params[0] * x.x + params[1] * x.y + params[2], params[3] * x.x + params[4] * x.y + params[5]);
+}
+
+fn reduce(l: u32) {
+  for (var stride = 128u; stride > 0u; stride >>= 1u) {
+    if (l < stride) {
+      for (var k = 0; k < 12; k++) { acc[l][k] += acc[l + stride][k]; }
+    }
+    workgroupBarrier();
+  }
+}
+
+@compute @workgroup_size(256)
+fn main(@builtin(local_invocation_index) l: u32) {
+  let n = p.grid.x * p.grid.y;
+  let dims = vec2f(textureDimensions(flow));
+  // Reweighted least squares: each round trusts the samples the last fit explained.
+  var sigmas = array<f32, 5>(1e9, 6.0, 3.0, 1.5, 1.5);
+  for (var round = 0; round < 5; round++) {
+    var s = array<f32, 12>();
+    for (var i = i32(l); i < n; i += 256) {
+      let m = motion(i, dims);
+      var w = 1.0;
+      if (round > 0) {
+        let r = distance(m.zw, predict(m.xy)) / (sigmas[round] * p.scale);
+        w = 1.0 / (1.0 + r * r);
+      }
+      let x = m.x;
+      let y = m.y;
+      s[0] += w * x * x; s[1] += w * x * y; s[2] += w * x; s[3] += w * y * y; s[4] += w * y; s[5] += w;
+      s[6] += w * x * m.z; s[7] += w * y * m.z; s[8] += w * m.z;
+      s[9] += w * x * m.w; s[10] += w * y * m.w; s[11] += w * m.w;
+    }
+    acc[l] = s;
+    workgroupBarrier();
+    reduce(l);
+    if (l == 0u) {
+      var t = acc[0];
+      let det = t[0] * (t[3] * t[5] - t[4] * t[4]) - t[1] * (t[1] * t[5] - t[4] * t[2]) + t[2] * (t[1] * t[4] - t[3] * t[2]);
+      valid = select(0.0, 1.0, abs(det) > 1e-9);
+      for (var k = 0; k < 2; k++) {
+        let r = vec3f(t[6 + k * 3], t[7 + k * 3], t[8 + k * 3]);
+        let dx = r.x * (t[3] * t[5] - t[4] * t[4]) - t[1] * (r.y * t[5] - t[4] * r.z) + t[2] * (r.y * t[4] - t[3] * r.z);
+        let dy = t[0] * (r.y * t[5] - t[4] * r.z) - r.x * (t[1] * t[5] - t[4] * t[2]) + t[2] * (t[1] * r.z - r.y * t[2]);
+        let dz = t[0] * (t[3] * r.z - r.y * t[4]) - t[1] * (t[1] * r.z - r.y * t[2]) + r.x * (t[1] * t[4] - t[3] * t[2]);
+        let safe = select(1.0, det, abs(det) > 1e-9);
+        params[k * 3] = dx / safe;
+        params[k * 3 + 1] = dy / safe;
+        params[k * 3 + 2] = dz / safe;
+      }
+    }
+    workgroupBarrier();
+  }
+  // How much of the picture the fit explains decides whether it is used at all.
+  var inside = 0.0;
+  for (var i = i32(l); i < n; i += 256) {
+    let m = motion(i, dims);
+    if (distance(m.zw, predict(m.xy)) < 2.0 * p.scale) { inside += 1.0; }
+  }
+  acc[l][0] = inside;
+  for (var k = 1; k < 12; k++) { acc[l][k] = 0.0; }
+  workgroupBarrier();
+  reduce(l);
+  if (l == 0u) {
+    model[0] = vec4f(params[0], params[1], params[2], valid * acc[0][0] / f32(n));
+    model[1] = vec4f(params[3], params[4], params[5], 0.0);
+  }
+}`;
+
+  const GLOBAL_GATE_SHADER = /* wgsl */ `
+${LUMA}
+struct P { size: vec2f, cells: vec2i, scale: f32 }
+@group(0) @binding(0) var<uniform> p: P;
+@group(0) @binding(1) var a: texture_2d<f32>;
+@group(0) @binding(2) var b: texture_2d<f32>;
+@group(0) @binding(3) var linear: sampler;
+@group(0) @binding(4) var flow: texture_2d<f32>;
+@group(0) @binding(5) var<storage, read> model: array<vec4f, 2>;
+@group(0) @binding(6) var<storage, read_write> amounts: array<f32>;
+
+fn la(x: vec2f) -> f32 { return dot(textureSampleLevel(a, linear, x / p.size, 0.0).rgb, LUMA); }
+fn lb(x: vec2f) -> f32 { return dot(textureSampleLevel(b, linear, x / p.size, 0.0).rgb, LUMA); }
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  let id = vec2i(g.xy);
+  if (id.x >= p.cells.x || id.y >= p.cells.y) { return; }
+  let i = id.y * p.cells.x + id.x;
+  if (model[0].w < ${GLOBAL_MIN_SHARE}) {
+    amounts[i] = 0.0;
+    return;
+  }
+  let c = (vec2f(id) + 0.5) * ${GLOBAL_CELL}.0 * p.scale;
+  let x = c / p.size - 0.5;
+  let vGlobal = vec2f(dot(model[0].xyz, vec3f(x, 1.0)), dot(model[1].xyz, vec3f(x, 1.0)));
+  let f = textureSampleLevel(flow, linear, c / p.size, 0.0) * vec4f(p.size, p.size);
+  let vNow = f.zw - f.xy;
+  if (distance(vGlobal, vNow) < 0.5 * p.scale) {
+    amounts[i] = 1.0;
+    return;
+  }
+  // Windows may shift, so a cell at an object's edge can decide from the side it belongs to.
+  var qGlobal = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+  var qNow = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+  for (var y = -2; y <= 2; y++) {
+    for (var x = -2; x <= 2; x++) {
+      let s = c + vec2f(f32(x), f32(y)) * 3.0 * p.scale;
+      let eGlobal = abs(la(s - vGlobal * 0.5) - lb(s + vGlobal * 0.5));
+      let eNow = abs(la(s - vNow * 0.5) - lb(s + vNow * 0.5));
+      for (var q = 0; q < 4; q++) {
+        let inX = select(x <= 0, x >= 0, (q & 1) == 1);
+        let inY = select(y <= 0, y >= 0, (q & 2) == 2);
+        if (inX && inY) {
+          qGlobal[q] += eGlobal;
+          qNow[q] += eNow;
+        }
+      }
+    }
+  }
+  let global = min(min(qGlobal[0], qGlobal[1]), min(qGlobal[2], qGlobal[3])) / 9.0;
+  let now = min(min(qNow[0], qNow[1]), min(qNow[2], qNow[3])) / 9.0;
+  // As good is enough: of two motions that both match, the fitted one is the precise one. A moving
+  // object does not match the camera's motion, so it keeps the network's.
+  amounts[i] = clamp((now - global + ${GLOBAL_TOLERANCE}) / ${GLOBAL_TOLERANCE}, 0.0, 1.0);
+}`;
+
+  const GLOBAL_APPLY_SHADER = /* wgsl */ `
+struct P { size: vec2f, cells: vec2i, scale: f32 }
+@group(0) @binding(0) var<uniform> p: P;
+@group(0) @binding(1) var<storage, read> model: array<vec4f, 2>;
+@group(0) @binding(2) var<storage, read> amounts: array<f32>;
+@group(0) @binding(3) var flowIn: texture_2d<f32>;
+@group(0) @binding(4) var maskIn: texture_2d<f32>;
+@group(0) @binding(5) var flowOut: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(6) var maskOut: texture_storage_2d<rgba8unorm, write>;
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  let size = vec2i(textureDimensions(flowOut));
+  let id = vec2i(g.xy);
+  if (id.x >= size.x || id.y >= size.y) { return; }
+  let uv = (vec2f(id) + 0.5) / vec2f(size);
+  let flow = textureLoad(flowIn, id, 0);
+  let mask = textureLoad(maskIn, id, 0);
+  let gc = clamp(uv * p.size / (${GLOBAL_CELL}.0 * p.scale) - 0.5, vec2f(0.0), vec2f(p.cells - 1));
+  let ci = vec2i(gc);
+  let cj = min(ci + 1, p.cells - 1);
+  let ck = gc - vec2f(ci);
+  let amount = mix(
+    mix(amounts[ci.y * p.cells.x + ci.x], amounts[ci.y * p.cells.x + cj.x], ck.x),
+    mix(amounts[cj.y * p.cells.x + ci.x], amounts[cj.y * p.cells.x + cj.x], ck.x),
+    ck.y,
+  );
+  if (amount <= 0.001) {
+    textureStore(flowOut, id, flow);
+    textureStore(maskOut, id, mask);
+    return;
+  }
+  let x = uv - 0.5;
+  let v = vec2f(dot(model[0].xyz, vec3f(x, 1.0)), dot(model[1].xyz, vec3f(x, 1.0)));
+  // Two motions far apart cannot be blended into one that matches: choose, do not fade.
+  let apart = distance((flow.zw - flow.xy) * p.size, v) > 1.5 * p.scale;
+  let share = select(amount, step(0.5, amount), apart);
+  let u = v / p.size;
+  textureStore(flowOut, id, mix(flow, vec4f(-u * 0.5, u * 0.5), share));
+  textureStore(maskOut, id, vec4f(mix(mask.r, 0.5, share)));
+}`;
+
   // What the repaired flow still cannot explain, on a coarse grid: only a hard cut stays high.
   const RESIDUAL_SHADER = /* wgsl */ `
 ${LUMA}
@@ -524,6 +715,9 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
         feather: compute(FEATHER_SHADER),
         apply: compute(APPLY_SHADER),
         residual: compute(RESIDUAL_SHADER),
+        fit: compute(FIT_SHADER),
+        globalGate: compute(GLOBAL_GATE_SHADER),
+        globalApply: compute(GLOBAL_APPLY_SHADER),
       };
       this.twiddle = device.createBuffer({ size: (TILE / 2) * 8, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
       const angles = new Float32Array(TILE);
@@ -577,6 +771,23 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
         i.set([nx, ny, this.cells[0], this.cells[1]], 6);
       });
       this.cellParams = uniform((f, i) => i.set([this.cells[0], this.cells[1]]));
+      const scale = height / 1080;
+      this.globalCells = [Math.ceil(width / (GLOBAL_CELL * scale)), Math.ceil(height / (GLOBAL_CELL * scale))];
+      this.model = d.createBuffer({ size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }); // readable, so tests can see the fit
+      this.owned.push(this.model);
+      this.globalRaw = storage(this.globalCells[0] * this.globalCells[1] * 4);
+      this.globalSoft = storage(this.globalCells[0] * this.globalCells[1] * 4);
+      this.fitParams = uniform((f, i) => {
+        f.set([width, height]);
+        i.set(FIT_GRID, 2);
+        f[4] = scale;
+      });
+      this.globalParams = uniform((f, i) => {
+        f.set([width, height]);
+        i.set(this.globalCells, 2);
+        f[4] = scale;
+      });
+      this.globalFeatherParams = uniform((f, i) => i.set(this.globalCells));
       this.gateParams = uniform((f, i) => i.set([this.gate[0], this.gate[1]]));
       this.sizeParams = uniform((f, i) => {
         f.set([width, height]);
@@ -600,6 +811,10 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
       this.fixedSmooth = [
         { pipeline: p.smooth, group: group(p.smooth, [this.cellParams, this.cellsRaw, this.cellsSmooth]), x: Math.ceil(this.cells[0] / 8), y: Math.ceil(this.cells[1] / 8), z: 1, cost: this.cells[0] * this.cells[1] * 16 },
       ];
+      const [gcw, gch] = this.globalCells;
+      this.fixedGlobalFeather = [
+        { pipeline: p.feather, group: group(p.feather, [this.globalFeatherParams, this.globalRaw, this.globalSoft]), x: Math.ceil(gcw / 8), y: Math.ceil(gch / 8), z: 1, cost: gcw * gch * 16 },
+      ];
       this.fixedFeather = [
         { pipeline: p.feather, group: group(p.feather, [this.gateParams, this.useRaw, this.useSoft]), x: Math.ceil(this.gate[0] / 8), y: Math.ceil(this.gate[1] / 8), z: 1, cost: this.gate[0] * this.gate[1] * 16 },
       ];
@@ -609,6 +824,15 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
     plan(frameA, frameB, flowIn, maskIn, flowOut, maskOut, residual, grid) {
       const p = this.pipelines;
       const { group, sampler, tiles } = this;
+      if (this.midFlow?.width !== flowOut.width || this.midFlow?.height !== flowOut.height) {
+        this.midFlow?.destroy();
+        this.midMask?.destroy();
+        const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING;
+        this.midFlow = this.device.createTexture({ size: [flowOut.width, flowOut.height], format: "rgba16float", usage });
+        this.midMask = this.device.createTexture({ size: [flowOut.width, flowOut.height], format: "rgba8unorm", usage });
+      }
+      const { midFlow, midMask } = this;
+      const [gcw, gch] = this.globalCells;
       const sampled = sampler;
       const [cw, ch] = this.cells;
       const [gw, gh] = this.gate;
@@ -642,7 +866,32 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
         ...this.fixedFeather,
         {
           pipeline: p.apply,
-          group: group(p.apply, [this.sizeParams, this.cellsSmooth, this.useSoft, flowIn, maskIn, flowOut, maskOut]),
+          group: group(p.apply, [this.sizeParams, this.cellsSmooth, this.useSoft, flowIn, maskIn, midFlow, midMask]),
+          x: Math.ceil(flowOut.width / 8),
+          y: Math.ceil(flowOut.height / 8),
+          z: 1,
+          cost: flowOut.width * flowOut.height * 16,
+        },
+        {
+          pipeline: p.fit,
+          group: group(p.fit, [this.fitParams, midFlow, this.model]),
+          x: 1,
+          y: 1,
+          z: 1,
+          cost: FIT_GRID[0] * FIT_GRID[1] * 6 * 40,
+        },
+        {
+          pipeline: p.globalGate,
+          group: group(p.globalGate, [this.globalParams, frameA, frameB, sampled, midFlow, this.model, this.globalRaw]),
+          x: Math.ceil(gcw / 8),
+          y: Math.ceil(gch / 8),
+          z: 1,
+          cost: gcw * gch * 50 * SAMPLE_COST,
+        },
+        ...this.fixedGlobalFeather,
+        {
+          pipeline: p.globalApply,
+          group: group(p.globalApply, [this.globalParams, this.model, this.globalSoft, midFlow, midMask, flowOut, maskOut]),
           x: Math.ceil(flowOut.width / 8),
           y: Math.ceil(flowOut.height / 8),
           z: 1,
@@ -671,6 +920,9 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
     release() {
       for (const buffer of this.owned) buffer.destroy();
       this.owned = [];
+      this.midFlow?.destroy();
+      this.midMask?.destroy();
+      this.midFlow = this.midMask = null;
     }
   }
 

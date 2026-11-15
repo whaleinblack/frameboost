@@ -56,8 +56,38 @@ const results = await page.evaluate(async () => {
     g.fillStyle = "#f0f0f0";
     for (let x = -period * 2; x < W + period * 2; x += period) g.fillRect(x + (t * speed) % period, 0, period / 2, H);
   };
+  // A drone turning over a field of identical mirrors: one motion for the whole picture, and every
+  // mirror looks like its neighbour, so matching point by point can land on the wrong one.
+  // Real fields are not perfect: the ground shows through, and mirrors differ a little in place and tone.
+  const field = new OffscreenCanvas(1800, 1800);
+  {
+    const f = field.getContext("2d");
+    f.drawImage(background, 0, 0, 1800, 1800);
+    f.fillStyle = "rgba(184, 164, 140, 0.75)";
+    f.fillRect(0, 0, 1800, 1800);
+    const r = rng(7);
+    for (let y = 0; y < 1800; y += 22) {
+      for (let x = 0; x < 1800; x += 26) {
+        const jx = (r() - 0.5) * 3;
+        const jy = (r() - 0.5) * 3;
+        f.fillStyle = "#202020";
+        f.fillRect(x + jx + 4, y + jy + 5, 12, 10);
+        f.fillStyle = `hsl(200 ${15 + r() * 20}% ${70 + r() * 18}%)`;
+        f.fillRect(x + jx, y + jy, 12, 10);
+      }
+    }
+  }
+  const mirrors = (g, t) => {
+    g.save();
+    g.translate(W / 2, H / 2);
+    g.rotate((t * 0.3 * Math.PI) / 180);
+    g.scale(1 + t * 0.001, 1 + t * 0.001);
+    g.drawImage(field, -900, -900);
+    g.restore();
+  };
   const scenes = {
     "中速平移 16px": (g, t) => g.drawImage(background, -300 - t * 16.3, -200 - t * 5.2),
+    "旋转的密集镜面阵列": mirrors,
     "前景物体 + 平移背景": (g, t) => {
       g.drawImage(background, -300 - t * 12.3, -200 + t * 3.6);
       g.drawImage(sprite, 150 + t * 24.5, 150 - t * 8.5);
@@ -150,6 +180,8 @@ const failures = [];
 for (const row of results.rows) {
   if (row["t=0.5"] <= row["t=0.5 淡化"] || row["t=0.25"] <= row["t=0.25 淡化"]) failures.push(`not better than a cross-fade: ${row.name}`);
   if (row.name.includes("条纹") && row["t=0.5"] < 18) failures.push(`stripes not repaired: ${row.name}`);
+  // Point by point it lands near 27 dB with doubled mirrors; the fitted whole-picture motion gives over 40.
+  if (row.name.includes("镜面") && row["t=0.5"] < 35) failures.push(`mirror field not aligned: ${row.name}`);
 }
 for (const row of results.ends) {
   if (row.start < 45 || row.end < 45) failures.push(`real frames not exact at the ends: ${row.name}`);
